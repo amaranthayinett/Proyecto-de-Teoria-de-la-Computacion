@@ -1,0 +1,430 @@
+import time
+
+
+class BancoDFA:
+    """
+    Autómata del banco.
+    Responsable de:
+    - validar tarjeta
+    - validar PIN
+    - verificar fondos
+    - cambiar clave
+    """
+
+    def __init__(self):
+        self.estado_actual = "b0"
+
+        # Base de datos simulada
+        self.tarjetas = {
+            "123456": {
+                "pin": "1234",
+                "saldo": 1000,
+                "bloqueada": False
+            }
+        }
+
+    def validar_tarjeta(self, numero_tarjeta):
+        print("\n[BANCO] Validando tarjeta...")
+        time.sleep(1)
+
+        if numero_tarjeta in self.tarjetas:
+            if self.tarjetas[numero_tarjeta]["bloqueada"]:
+                self.estado_actual = "b_error"
+                return False, "Tarjeta bloqueada"
+
+            self.estado_actual = "b_tarjeta_ok"
+            return True, "Tarjeta válida"
+
+        self.estado_actual = "b_error"
+        return False, "Tarjeta inválida"
+
+    def validar_pin(self, numero_tarjeta, pin):
+        print("[BANCO] Verificando PIN...")
+        time.sleep(1)
+
+        if self.tarjetas[numero_tarjeta]["pin"] == pin:
+            self.estado_actual = "b_pin_ok"
+            return True
+
+        self.estado_actual = "b_error"
+        return False
+
+    def verificar_fondos(self, numero_tarjeta, monto):
+        print("[BANCO] Verificando fondos...")
+        time.sleep(1)
+
+        saldo = self.tarjetas[numero_tarjeta]["saldo"]
+
+        if monto <= saldo:
+            self.estado_actual = "b_fondos_ok"
+            return True
+
+        self.estado_actual = "b_error"
+        return False
+
+    def descontar_saldo(self, numero_tarjeta, monto):
+        self.tarjetas[numero_tarjeta]["saldo"] -= monto
+
+    def consultar_saldo(self, numero_tarjeta):
+        return self.tarjetas[numero_tarjeta]["saldo"]
+
+    def cambiar_pin(self, numero_tarjeta, nuevo_pin):
+        self.tarjetas[numero_tarjeta]["pin"] = nuevo_pin
+        self.estado_actual = "b_pin_cambiado"
+
+    def bloquear_tarjeta(self, numero_tarjeta):
+        self.tarjetas[numero_tarjeta]["bloqueada"] = True
+        self.estado_actual = "b_tarjeta_bloqueada"
+
+
+class CajeroAutomaticoDFA:
+    """
+    Definición formal del autómata:
+
+    M = (Q, Σ, δ, q0, F)
+
+    Q = conjunto de estados
+    Σ = conjunto de símbolos
+    δ = función de transición
+    q0 = estado inicial
+    F = estados finales
+    """
+
+    def __init__(self):
+
+        # =========================
+        # ESTADOS (Q)
+        # =========================
+        self.Q = {
+            "q0",  # reposo
+            "q1",  # tarjeta insertada
+            "q2",  # validando tarjeta
+            "q3",  # tarjeta válida
+            "q4",  # validando PIN
+            "q5",  # autenticado
+            "q6",  # menú principal
+            "q7",  # retiro
+            "q8",  # verificando fondos
+            "q9",  # entregando dinero
+            "q10", # consulta saldo
+            "q11", # cambio clave
+            "q12", # finalizado
+            "q13", # error
+            "q14"  # tarjeta bloqueada
+        }
+
+        # =========================
+        # ALFABETO (Σ)
+        # =========================
+        self.Sigma = {
+            "insertar_tarjeta",
+            "validar_tarjeta",
+            "pin_correcto",
+            "pin_incorrecto",
+            "seleccionar_retiro",
+            "seleccionar_consulta",
+            "seleccionar_cambio_clave",
+            "fondos_ok",
+            "fondos_insuficientes",
+            "finalizar"
+        }
+
+        # Estado inicial
+        self.estado_actual = "q0"
+
+        # Estados finales
+        self.F = {"q12", "q14"}
+
+        # Variables de control
+        self.finalizado = False
+        self.intentos_pin = 0
+        self.numero_tarjeta = None
+
+        # Banco
+        self.banco = BancoDFA()
+
+    # ==========================================
+    # FUNCIÓN DE TRANSICIÓN δ
+    # ==========================================
+
+    def transicion(self, simbolo):
+
+        print(f"\n[ATM] Estado actual: {self.estado_actual}")
+        print(f"[ATM] Símbolo recibido: {simbolo}")
+
+        # ==========================================
+        # q0 -> insertar tarjeta
+        # ==========================================
+        if self.estado_actual == "q0":
+
+            if simbolo == "insertar_tarjeta":
+                self.estado_actual = "q1"
+
+        # ==========================================
+        # q1 -> validar tarjeta
+        # ==========================================
+        elif self.estado_actual == "q1":
+
+            if simbolo == "validar_tarjeta":
+
+                self.estado_actual = "q2"
+
+                print("\n[PROTOCOLO] ATM -> BANCO : validar_tarjeta")
+
+                valida, mensaje = self.banco.validar_tarjeta(self.numero_tarjeta)
+
+                print(f"[BANCO] {mensaje}")
+
+                if valida:
+                    print("[PROTOCOLO] BANCO -> ATM : tarjeta_ok")
+                    self.estado_actual = "q3"
+                else:
+                    print("[PROTOCOLO] BANCO -> ATM : tarjeta_error")
+                    self.estado_actual = "q13"
+
+        # ==========================================
+        # q3 -> autenticación
+        # ==========================================
+        elif self.estado_actual == "q3":
+
+            self.estado_actual = "q4"
+
+            pin = input("Ingrese PIN: ")
+
+            print("\n[PROTOCOLO] ATM -> BANCO : validar_pin")
+
+            valido = self.banco.validar_pin(self.numero_tarjeta, pin)
+
+            if valido:
+                print("[PROTOCOLO] BANCO -> ATM : pin_ok")
+                self.estado_actual = "q5"
+                self.intentos_pin = 0
+
+            else:
+                print("[PROTOCOLO] BANCO -> ATM : pin_error")
+                self.intentos_pin += 1
+
+                print(f"Intento fallido #{self.intentos_pin}")
+
+                if self.intentos_pin >= 3:
+                    self.banco.bloquear_tarjeta(self.numero_tarjeta)
+                    self.estado_actual = "q14"
+                else:
+                    self.estado_actual = "q13"
+
+        # ==========================================
+        # q5 -> menú principal
+        # ==========================================
+        elif self.estado_actual == "q5":
+            self.estado_actual = "q6"
+
+        # ==========================================
+        # MENÚ PRINCIPAL
+        # ==========================================
+        elif self.estado_actual == "q6":
+
+            if simbolo == "seleccionar_retiro":
+                self.estado_actual = "q7"
+
+            elif simbolo == "seleccionar_consulta":
+                self.estado_actual = "q10"
+
+            elif simbolo == "seleccionar_cambio_clave":
+                self.estado_actual = "q11"
+
+        # ==========================================
+        # RETIRO
+        # ==========================================
+        elif self.estado_actual == "q7":
+
+            monto = float(input("Monto a retirar: "))
+
+            self.estado_actual = "q8"
+
+            print("\n[PROTOCOLO] ATM -> BANCO : solicitar_retiro")
+
+            fondos = self.banco.verificar_fondos(self.numero_tarjeta, monto)
+
+            if fondos:
+                print("[PROTOCOLO] BANCO -> ATM : retiro_aprobado")
+
+                self.banco.descontar_saldo(self.numero_tarjeta, monto)
+
+                self.estado_actual = "q9"
+
+                print(f"\n[ATM] Entregando ${monto}...")
+                time.sleep(1)
+
+                print("[ATM] Retire su dinero")
+
+                self.estado_actual = "q12"
+
+            else:
+                print("[PROTOCOLO] BANCO -> ATM : retiro_rechazado")
+                print("Fondos insuficientes")
+                self.estado_actual = "q13"
+
+        # ==========================================
+        # CONSULTA DE SALDO
+        # ==========================================
+        elif self.estado_actual == "q10":
+
+            saldo = self.banco.consultar_saldo(self.numero_tarjeta)
+
+            print(f"\n[ATM] Saldo disponible: ${saldo}")
+
+            self.estado_actual = "q12"
+
+        # ==========================================
+        # CAMBIO DE CLAVE
+        # ==========================================
+        elif self.estado_actual == "q11":
+
+            nueva = input("Ingrese nueva clave: ")
+
+            self.banco.cambiar_pin(self.numero_tarjeta, nueva)
+
+            print("\n[BANCO] Clave actualizada correctamente")
+
+            self.estado_actual = "q12"
+
+        # ==========================================
+        # ERRORES
+        # ==========================================
+        elif self.estado_actual == "q13":
+
+            print("\n[ATM] ERROR EN LA OPERACIÓN")
+
+            opcion = input("¿Desea reintentar? (s/n): ").lower()
+
+            if opcion == "s":
+                self.estado_actual = "q3"
+            else:
+                self.estado_actual = "q12"
+
+        # ==========================================
+        # TARJETA BLOQUEADA
+        # ==========================================
+        elif self.estado_actual == "q14":
+
+            print("\n[ATM] TARJETA BLOQUEADA")
+            print("Demasiados intentos fallidos")
+
+            self.finalizado = True
+
+        # ==========================================
+        # ESTADO FINAL
+        # ==========================================
+        if self.estado_actual == "q12":
+
+            print("\n[ATM] Transacción finalizada")
+            print("[ATM] Retire su tarjeta")
+
+            self.finalizado = True
+
+    # ==========================================
+    # SIMULADOR DEL AUTÓMATA
+    # ==========================================
+
+    def ejecutar(self):
+
+        print("=" * 50)
+        print("CAJERO AUTOMÁTICO BASADO EN AUTÓMATAS")
+        print("=" * 50)
+
+        while not self.finalizado:
+
+            # =========================
+            # q0
+            # =========================
+            if self.estado_actual == "q0":
+
+                tarjeta = input("Ingrese número de tarjeta: ")
+
+                self.numero_tarjeta = tarjeta
+
+                self.transicion("insertar_tarjeta")
+
+            # =========================
+            # q1
+            # =========================
+            elif self.estado_actual == "q1":
+                self.transicion("validar_tarjeta")
+
+            # =========================
+            # q3
+            # =========================
+            elif self.estado_actual == "q3":
+                self.transicion("pin_correcto")
+
+            # =========================
+            # q5
+            # =========================
+            elif self.estado_actual == "q5":
+                self.transicion("menu")
+
+            # =========================
+            # q6
+            # =========================
+            elif self.estado_actual == "q6":
+
+                print("\n========= MENÚ =========")
+                print("1. Retiro")
+                print("2. Consulta de saldo")
+                print("3. Cambio de clave")
+                print("4. Salir")
+
+                opcion = input("Seleccione opción: ")
+
+                if opcion == "1":
+                    self.transicion("seleccionar_retiro")
+
+                elif opcion == "2":
+                    self.transicion("seleccionar_consulta")
+
+                elif opcion == "3":
+                    self.transicion("seleccionar_cambio_clave")
+
+                elif opcion == "4":
+                    self.estado_actual = "q12"
+
+            # =========================
+            # q7
+            # =========================
+            elif self.estado_actual == "q7":
+                self.transicion("fondos_ok")
+
+            # =========================
+            # q10
+            # =========================
+            elif self.estado_actual == "q10":
+                self.transicion("consultar")
+
+            # =========================
+            # q11
+            # =========================
+            elif self.estado_actual == "q11":
+                self.transicion("cambiar_clave")
+
+            # =========================
+            # q13
+            # =========================
+            elif self.estado_actual == "q13":
+                self.transicion("error")
+
+            # =========================
+            # q14
+            # =========================
+            elif self.estado_actual == "q14":
+                self.transicion("bloqueo")
+
+
+# ==========================================
+# EJECUCIÓN DEL SISTEMA
+# ==========================================
+
+if __name__ == "__main__":
+
+    cajero = CajeroAutomaticoDFA()
+
+    cajero.ejecutar()
